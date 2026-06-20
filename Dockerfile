@@ -7,12 +7,9 @@ ENV PYTHONPATH=/app/src
 
 COPY src/ /app/src/
 
-RUN addgroup -S app \
-    && adduser -S app -G app \
-    && mkdir -p /data/cache /data/output /data/state \
-    && chown -R app:app /data /app
+RUN mkdir -p /data/cache /data/output /data/state
 
-USER app
+USER root
 
 VOLUME ["/data"]
 

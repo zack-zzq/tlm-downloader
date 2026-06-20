@@ -36,6 +36,9 @@ The generated pack will be written to:
 ./data/output/tlm_all_packs.zip
 ```
 
+The container runs as `root` so it can write to bind-mounted output paths such
+as `/data/output` or an additional web directory like `/dst`.
+
 Publish that file through your own web server and configure the mod server:
 
 ```toml
