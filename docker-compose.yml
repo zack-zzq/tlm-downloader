@@ -1,0 +1,12 @@
+services:
+  tlm-auto-download:
+    image: ghcr.io/your-org-or-user/touhoulittlemaid-auto-download:latest
+    build:
+      context: .
+    restart: unless-stopped
+    environment:
+      TLM_INTERVAL_SECONDS: "21600"
+      TLM_DOWNLOAD_DELAY_SECONDS: "3"
+      TLM_OUTPUT_ZIP: /data/output/tlm_all_packs.zip
+    volumes:
+      - ./data:/data
