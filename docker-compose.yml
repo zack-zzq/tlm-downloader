@@ -1,6 +1,6 @@
 services:
   tlm-auto-download:
-    image: ghcr.io/your-org-or-user/touhoulittlemaid-auto-download:latest
+    image: ghcr.io/zack-zzq/tlm-downloader:latest
     build:
       context: .
     restart: unless-stopped

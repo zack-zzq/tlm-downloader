@@ -21,7 +21,7 @@ The output zip is meant to be served by your own HTTP server, then referenced in
 ```yaml
 services:
   tlm-auto-download:
-    image: ghcr.io/YOUR_ORG_OR_USER/touhoulittlemaid-auto-download:latest
+    image: ghcr.io/zack-zzq/tlm-downloader:latest
     restart: unless-stopped
     environment:
       TLM_INTERVAL_SECONDS: "21600"
