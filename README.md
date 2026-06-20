@@ -12,7 +12,8 @@ The output zip is meant to be served by your own HTTP server, then referenced in
 - Fetches `info.json` on a fixed interval.
 - Downloads only missing or changed packs.
 - Verifies each downloaded pack with the `checksum` field from `info.json`.
-- Builds one merged zip that keeps standard TLM paths like `assets/<namespace>/...`.
+- Builds one merged zip that only contains `assets/`, `pack.mcmeta`, and `pack.png`.
+- Copies `pack.mcmeta` and `pack.png` from the project `static/` directory.
 - Adds directory entries such as `assets/<namespace>/` so TLM can discover each namespace.
 - Avoids nested zip packs. If a source pack contains `modelA.zip`, it will not be unpacked.
 
@@ -58,7 +59,8 @@ ClientPackDownloadUrls = [
 | `TLM_MAX_PACK_BYTES` | `26214400` | Max size per source pack. Matches the mod default 25 MiB. |
 | `TLM_CACHE_DIR` | `/data/cache` | Cache for source zip files. |
 | `TLM_OUTPUT_ZIP` | `/data/output/tlm_all_packs.zip` | Merged output zip. |
-| `TLM_STATE_DIR` | `/data/state` | State and manifest directory. |
+| `TLM_STATE_DIR` | `/data/state` | State directory. |
+| `TLM_STATIC_DIR` | `/app/static` | Source directory for output `pack.mcmeta` and `pack.png`. |
 | `TLM_RUN_ONCE` | `false` | Run one cycle and exit. Useful for cron or CI. |
 | `TLM_DELETE_STALE` | `false` | Delete cached zips no longer listed in `info.json`. |
 

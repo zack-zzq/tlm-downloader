@@ -23,11 +23,12 @@ from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo, is_zipfile
 LOGGER = logging.getLogger("tlm-auto-download")
 DEFAULT_INFO_URL = "https://tlmdl.cfpa.team/info.json"
 DEFAULT_PACK_MAX_BYTES = 25 * 1024 * 1024
-MANIFEST_NAME = "tlm_auto_download_manifest.json"
 STATE_NAME = "aggregate_state.json"
 INFO_CACHE_NAME = "info.json"
 CHUNK_SIZE = 1024 * 1024
 SAFE_FILE_RE = re.compile(r"[^A-Za-z0-9._-]+")
+ROOT_PACK_FILES = ("pack.mcmeta", "pack.png")
+DEFAULT_STATIC_DIR = Path(__file__).resolve().parents[2] / "static"
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ class Config:
     cache_dir: Path
     output_zip: Path
     state_dir: Path
+    static_dir: Path
     interval_seconds: int
     download_delay_seconds: float
     timeout_seconds: int
@@ -50,6 +52,7 @@ class Config:
             cache_dir=Path(os.getenv("TLM_CACHE_DIR", "/data/cache")),
             output_zip=Path(os.getenv("TLM_OUTPUT_ZIP", "/data/output/tlm_all_packs.zip")),
             state_dir=Path(os.getenv("TLM_STATE_DIR", "/data/state")),
+            static_dir=Path(os.getenv("TLM_STATIC_DIR", str(DEFAULT_STATIC_DIR))),
             interval_seconds=env_int("TLM_INTERVAL_SECONDS", 6 * 60 * 60, minimum=60),
             download_delay_seconds=env_float("TLM_DOWNLOAD_DELAY_SECONDS", 3.0, minimum=0.0),
             timeout_seconds=env_int("TLM_HTTP_TIMEOUT_SECONDS", 60, minimum=5),
@@ -228,6 +231,14 @@ def crc32_file(path: Path) -> int:
     return checksum & 0xFFFFFFFF
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(CHUNK_SIZE), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def ensure_downloaded(entry: DownloadEntry, config: Config) -> DownloadResult:
     config.cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = config.cache_dir / entry.file_name
@@ -290,6 +301,14 @@ def delete_stale_cache(entries: list[DownloadEntry], cache_dir: Path) -> None:
 def source_state(results: list[DownloadResult], config: Config) -> dict[str, Any]:
     return {
         "info_url": config.info_url,
+        "root_pack_files": [
+            {
+                "name": name,
+                "sha256": sha256_file(static_pack_file(config, name)),
+                "size": static_pack_file(config, name).stat().st_size,
+            }
+            for name in ROOT_PACK_FILES
+        ],
         "packs": [
             {
                 "file_name": result.entry.file_name,
@@ -350,6 +369,18 @@ def valid_zip_member(name: str) -> str | None:
     return str(path)
 
 
+def is_asset_member(member_name: str) -> bool:
+    path = PurePosixPath(member_name)
+    return len(path.parts) > 1 and path.parts[0] == "assets"
+
+
+def static_pack_file(config: Config, name: str) -> Path:
+    path = config.static_dir / name
+    if not path.is_file():
+        raise RuntimeError(f"missing static pack file: {path}")
+    return path
+
+
 def add_directory(zip_file: ZipFile, directories: set[str], directory: str) -> None:
     if not directory.endswith("/"):
         directory = f"{directory}/"
@@ -369,16 +400,24 @@ def ensure_parent_directories(zip_file: ZipFile, directories: set[str], member_n
         add_directory(zip_file, directories, "/".join(current))
 
 
-def merge_packs(results: list[DownloadResult], config: Config, state: dict[str, Any]) -> None:
+def write_root_pack_files(zip_file: ZipFile, config: Config) -> int:
+    written = 0
+    for name in ROOT_PACK_FILES:
+        zip_file.write(static_pack_file(config, name), arcname=name, compress_type=ZIP_DEFLATED)
+        written += 1
+    return written
+
+
+def merge_packs(results: list[DownloadResult], config: Config) -> None:
     config.output_zip.parent.mkdir(parents=True, exist_ok=True)
     tmp_output = config.output_zip.with_name(f".{config.output_zip.name}.part")
     directories: set[str] = set()
     seen_files: dict[str, tuple[int, int, str]] = {}
-    conflicts: list[dict[str, Any]] = []
     written_files = 0
 
     with ZipFile(tmp_output, "w", compression=ZIP_DEFLATED, compresslevel=6, allowZip64=True) as output:
         add_directory(output, directories, "assets")
+        written_files += write_root_pack_files(output, config)
 
         for result in results:
             with ZipFile(result.path, "r") as source:
@@ -386,16 +425,13 @@ def merge_packs(results: list[DownloadResult], config: Config, state: dict[str, 
                     member_name = valid_zip_member(member.filename)
                     if member_name is None:
                         continue
+                    if not is_asset_member(member_name):
+                        continue
 
                     previous = seen_files.get(member_name)
                     current = (member.CRC, member.file_size, result.entry.file_name)
                     if previous is not None:
                         if previous[:2] != current[:2]:
-                            conflicts.append({
-                                "path": member_name,
-                                "kept_from": previous[2],
-                                "skipped_from": result.entry.file_name,
-                            })
                             LOGGER.warning(
                                 "Conflict for %s, keeping %s and skipping %s",
                                 member_name,
@@ -412,16 +448,6 @@ def merge_packs(results: list[DownloadResult], config: Config, state: dict[str, 
                         shutil.copyfileobj(source_file, target_file, CHUNK_SIZE)
                     seen_files[member_name] = current
                     written_files += 1
-
-        manifest = {
-            "generated_at": int(time.time()),
-            "source": config.info_url,
-            "pack_count": len(results),
-            "written_file_count": written_files,
-            "conflicts": conflicts,
-            "packs": state["packs"],
-        }
-        output.writestr(MANIFEST_NAME, json.dumps(manifest, ensure_ascii=True, indent=2))
 
     tmp_output.replace(config.output_zip)
     LOGGER.info("Wrote merged pack %s with %s files", config.output_zip, written_files)
@@ -453,7 +479,7 @@ def run_once(config: Config, stop_flag: StopFlag | None = None) -> None:
     state["hash"] = state_hash(state)
 
     if should_rebuild(config, state):
-        merge_packs(results, config, state)
+        merge_packs(results, config)
         save_state(config, state)
     else:
         LOGGER.info("Merged pack is up to date: %s", config.output_zip)

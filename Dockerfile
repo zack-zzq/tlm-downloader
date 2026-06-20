@@ -6,6 +6,7 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app/src
 
 COPY src/ /app/src/
+COPY static/ /app/static/
 
 RUN mkdir -p /data/cache /data/output /data/state
 
